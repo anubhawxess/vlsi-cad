@@ -1,26 +1,14 @@
 #include <vector>
+#include <numeric>
 #include <print>
 #include "QuadraticPlacer.h"
 #include "solver.h"
 
 pair<double, double> QuadraticPlacer::Parameters::get_new_boundary(
-    const pair<double, double>& coordinates
+    const pair<double, double>& coord, const bool vertical
 ) const {
-    return vertical ? make_pair( coordinates.first, high.second / 2 ) :
-                      make_pair( high.first / 2, coordinates.second );
-}
-
-QuadraticPlacer::Parameters QuadraticPlacer::Parameters::partition() {
-    const int middle = ( begin + end ) >> 1;
-    vertical ^= true;
-    Parameters params( *this );
-    params.first = false;
-    params.begin = middle;
-    params.low = get_new_boundary( low );
-    high = get_new_boundary( high );
-    end = middle;
-    first = true;
-    return params;
+    return vertical ? make_pair(midpoint(low.first, high.first), coord.second) :
+                      make_pair(coord.first, midpoint(low.second, high.second));
 }
 
 pair<double, double> QuadraticPlacer::Parameters::push_to_boundary(
@@ -30,19 +18,20 @@ pair<double, double> QuadraticPlacer::Parameters::push_to_boundary(
                       clamp( coordinates.second, low.second, high.second ) );
 }
 
-void QuadraticPlacer::quadratic_placement( const Parameters& params ) {
+void QuadraticPlacer::quadratic_placement(
+    const Parameters& params, const bool vertical, const bool lower
+) {
     vector<int> row, column;
     vector<double> data;
-    const vector<Gate>::iterator begin = Gates.begin() + params.begin;
     coo_matrix A;
     A.n = params.end - params.begin;
     valarray<double> bx( A.n ), by( A.n ), x( A.n );
 
     for ( int i = 0; i < A.n; ++i ) {
         const int index = i + params.begin;
-        const vector<int>& nets = Gates[index].Nets;
+        const vector<unsigned>& nets = Gates[index].Nets;
 
-        for ( const int& Net : nets ) {
+        for ( const unsigned& Net : nets ) {
             const vector<int>& net = Nets[Net];
             const double weight = 1 / static_cast<double>( net.size() - 1 );
 
@@ -67,8 +56,8 @@ void QuadraticPlacer::quadratic_placement( const Parameters& params ) {
                         );
 
                         if ( xi > xlo and xi < xhi and yi > ylo and yi < yhi ) {
-                            if (params.vertical) yi = params.first ? yhi : ylo;
-                            else xi = params.first ? xhi : xlo;
+                            if ( vertical ) xi = lower ? xhi : xlo;
+                            else yi = lower ? yhi : ylo;
                         }
 
                         bx[i] += weight * xi;
@@ -91,34 +80,44 @@ void QuadraticPlacer::quadratic_placement( const Parameters& params ) {
     for (int i = 0; i < A.n; ++i) Gates[i+params.begin].coordinates.first=x[i];
     A.solve( by, x );
     for (int i = 0; i < A.n; ++i) Gates[i+params.begin].coordinates.second=x[i];
+}
+
+QuadraticPlacer::Parameters QuadraticPlacer::partition( Parameters& params,
+                                                        const bool vertical ) {
+    const int middle = midpoint( params.begin, params.end );
+    const vector<Gate>::iterator begin = Gates.begin();
+    Parameters params2( params );
 
     ranges::nth_element(
-        begin,
-        begin + ( A.n >> 1 ),
-        begin + A.n,
-        [&params](const pair<double, double>& a,const pair<double, double>& b) {
-            return params.vertical ? a < b :
-                tie( a.second, a.first ) < tie( b.second, b.first );
+        begin + params.begin,
+        begin + middle,
+        begin + params.end,
+        [&vertical](const pair<double,double>& a,const pair<double,double>& b) {
+            return vertical ? a<b : tie(a.second,a.first)<tie(b.second,b.first);
         },
         &Gate::coordinates
     );
 
     for ( int i = params.begin; i < params.end; ++i ) {
         Gate& gate = Gates[i];
-        for (const int& Net : gate.Nets) *ranges::find(Nets[Net], gate.index)=i;
+        for(const unsigned& Net:gate.Nets)*ranges::find(Nets[Net],gate.index)=i;
         gate.index = i;
     }
+
+    params2.begin = middle;
+    params2.low = params.get_new_boundary( params.low, vertical );
+    params.high = params.get_new_boundary( params.high, vertical );
+    params.end = middle;
+    quadratic_placement( params, vertical );
+    quadratic_placement( params2, vertical, false );
+    return params2;
 }
 
 void QuadraticPlacer::recursiveQP( Parameters& params, int depth ) {
-    quadratic_placement( params );
-
     if ( depth-- ) {
-        Parameters params2 = params.partition();
-        quadratic_placement( params );
-        quadratic_placement( params2 );
-        Parameters params3 = params.partition();
-        Parameters params4 = params2.partition();
+        Parameters params2 = partition( params, true );
+        Parameters params3 = partition( params );
+        Parameters params4 = partition( params2 );
         recursiveQP( params, depth );
         recursiveQP( params2, depth );
         recursiveQP( params3, depth );
@@ -126,19 +125,20 @@ void QuadraticPlacer::recursiveQP( Parameters& params, int depth ) {
     }
 }
 
-QuadraticPlacer::QuadraticPlacer( ifstream file, const int depth ) {
-    int NumberofGates, NumberofNets, NumberofPads;
+QuadraticPlacer::QuadraticPlacer( ifstream file ) {
+    unsigned NumberofGates, NumberofNets, NumberofPads;
     file >> NumberofGates >> NumberofNets;
+    Parameters params( NumberofGates );
     Gates.resize( NumberofGates );
     Nets.resize( NumberofNets );
 
     for ( Gate& gate : Gates ) {
-        int NumNetsConnected;
+        unsigned NumNetsConnected;
         file >> gate.GateID >> NumNetsConnected;
         gate.index = gate.GateID - 1;
         gate.Nets.resize( NumNetsConnected );
 
-        for ( int& Net : gate.Nets ) {
+        for ( unsigned& Net : gate.Nets ) {
             file >> Net;
             Nets[--Net].push_back( gate.index );
         }
@@ -148,13 +148,14 @@ QuadraticPlacer::QuadraticPlacer( ifstream file, const int depth ) {
     Pins.resize( NumberofPads );
 
     for ( pair<int, int>& Pin : Pins ) {
-        int PinID, NetNumberConnectedTo;
+        int PinID;
+        unsigned NetNumberConnectedTo;
         file >> PinID >> NetNumberConnectedTo >> Pin.first >> Pin.second;
         Nets[--NetNumberConnectedTo].push_back( -PinID );
     }
 
-    Parameters params( NumberofGates );
-    recursiveQP( params, depth );
+    quadratic_placement( params, false );
+    recursiveQP( params );
     ranges::sort( Gates, {}, &Gate::GateID );
 
     for ( const Gate& gate : Gates )
@@ -167,6 +168,6 @@ QuadraticPlacer::QuadraticPlacer( ifstream file, const int depth ) {
 }
 
 int main( const int argc, const char *argv[] ) {
-    if ( argc != 3 ) return 1;
-    QuadraticPlacer quadratic_placer( ifstream( argv[1] ), atoi( argv[2] ) );
+    if ( argc != 2 ) return 1;
+    QuadraticPlacer quadratic_placer( ifstream{argv[1]} );
 }
