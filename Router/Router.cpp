@@ -91,11 +91,10 @@ void Router::MazeRouting( const Coordinates& source, Coordinates& target ) {
     source_cost = abs( source_cost );
     target_cost = abs( target_cost );
 
-    std::priority_queue wavefront{[]( const Cell& a, const Cell& b ) {
-        return a.path_cost > b.path_cost;
-    }, std::vector<Cell>{{source, source_cost, D}}};
-
-    for ( ; not wavefront.empty(); wavefront.pop() ) {
+    for ( std::priority_queue wavefront{
+            [](const Cell& a,const Cell& b) {return a.path_cost > b.path_cost;},
+            std::vector<Cell>{{source, source_cost, D}}
+        }; not wavefront.empty(); wavefront.pop() ) {
         const Cell C = wavefront.top();
 
         if ( C.coordinates == target ) {
