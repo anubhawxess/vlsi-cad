@@ -4,28 +4,38 @@ Implementation of an **analytical quadratic placer** with recursive partitioning
 
 ## Overview
 
-The placer minimizes quadratic wirelength by solving systems of linear equations (Ax = b) derived from a clique-based net model. After each global placement, a recursive partitioning strategy sorts and assigns gates to sub-regions, then re-solves the placement within each partition to spread gates uniformly across the chip.
+The placer minimizes quadratic wirelength by solving systems of linear equations (Ax = b) derived from a clique-based net model. After an initial global placement, a recursive partitioning strategy alternates vertical and horizontal cuts, sorting and assigning gates to sub-regions and re-solving the placement within each partition to spread gates uniformly across the chip. The recursion runs to a depth of 3, producing an 8x8 grid of 64 partitions.
 
 ## Algorithm
 
-### Core 3QP Placer
+### Placement Flow
 
-The required assignment implements exactly 3 quadratic placement solves:
+1. **Initial QP** -- Solve the full quadratic placement for all gates on the 100x100 chip.
+2. **Recursive Partitioning** (`recursiveQP`, depth=3) -- At each recursion level:
+   1. **Vertical partition** -- Sort gates by (X, Y) using `nth_element`, assign the first half to the left region and the second half to the right region, update boundaries using `std::midpoint`, then solve containment QP for both halves.
+   2. **Horizontal partition of left half** -- Sort gates by (Y, X), assign top and bottom halves, solve containment QP for both.
+   3. **Horizontal partition of right half** -- Same as above for the right sub-region.
+   4. **Recurse** on all 4 resulting sub-regions with depth - 1.
+3. **Output** -- Sort gates by ID and print coordinates with 8 digits of precision.
 
-1. **QP1** -- Solve the full placement problem for all gates on the 100x100 chip.
-2. **Sort & Assign** -- Sort gates by (X, Y) coordinates and assign the first half to the left partition (X: 0-50) and the second half to the right partition (X: 50-100). If the gate count is odd, the left side gets the smaller half.
-3. **Containment** -- For each partition, propagate connected gates/pads on the opposite side to the cut line (X = 50) while preserving their Y coordinates.
-4. **QP2** -- Solve placement for left-side gates within [0, 50] x [0, 100].
-5. **QP3** -- Solve placement for right-side gates within [50, 100] x [0, 100], using updated positions from QP2 for propagated left-side gates.
+This produces 4^3 = 64 leaf regions at the bottom of the recursion, forming the 8x8 grid.
 
-### 8x8 Deep Placer (Extra Credit)
+### Partition Step
 
-Extends the 3QP strategy with alternating vertical and horizontal cuts recursively down to an 8x8 grid of 64 partitions. The `recursiveQP` method handles this by partitioning each region into sub-regions and recursing until the desired depth is reached.
+Each `partition` call performs:
+1. **Assignment** -- `ranges::nth_element` with O(n) partial sort to divide gates at the median.
+2. **Index update** -- Remap gate indices in the net lists to reflect their new positions.
+3. **Boundary computation** -- Split the region using `std::midpoint` for correct boundaries at all recursion depths.
+4. **Containment QP** -- Solve placement for both sub-regions, propagating connected gates/pads on the opposite side to the cut boundary.
 
-Gate/pad propagation in the general case handles three scenarios:
+### Containment & Gate Propagation
+
+Gates outside the current partition are propagated to the region boundary:
 - **Left/right of region** -- Clamp X to the region boundary, keep Y.
 - **Above/below region** -- Keep X, clamp Y to the region boundary.
-- **Diagonal** -- Clamp to the nearest corner of the region.
+- **Diagonal** -- Clamp to the nearest corner of the region (`push_to_boundary` via `std::clamp`).
+
+Gates that fall strictly inside the region (between the boundary edges) but belong to the other partition are pushed to the appropriate edge based on the cut direction and which half (lower/upper) is being solved.
 
 ## Input Format
 
@@ -50,8 +60,8 @@ One line per gate, sorted by gate ID:
 
 | File | Description |
 |------|-------------|
-| `QuadraticPlacer.h` | Class definitions for `QuadraticPlacer`, `Gate`, and `Parameters` (partition boundaries and state) |
-| `QuadraticPlacer.cpp` | Matrix setup, Conjugate Gradient solve, partitioning, recursive QP, and I/O |
+| `QuadraticPlacer.h` | Class definitions for `QuadraticPlacer`, `Gate`, and `Parameters` (region bounds as `low`/`high` pairs) |
+| `QuadraticPlacer.cpp` | Matrix setup, CG solve, partitioning with `std::midpoint` boundary computation, recursive QP, and I/O |
 
 ## Dependencies
 
@@ -63,14 +73,11 @@ This implementation requires a **Conjugate Gradient sparse matrix solver** provi
 # Compile (solver.h must be in the include path)
 g++ -std=c++23 -O2 -o placer QuadraticPlacer.cpp
 
-# Run 3QP placer (depth = 0)
-./placer input.txt 0
-
-# Run 8x8 deep placer (depth = 2 gives 8x8 = 64 regions)
-./placer input.txt 2
+# Run the placer
+./placer input.txt
 ```
 
-The second argument controls recursion depth: `0` for the core 3QP placer, `2` for the full 8x8 placer.
+The program takes a single argument: the input netlist file. It always runs the full 8x8 recursive placer (depth=3, producing 64 partitions) and writes the placement result to stdout.
 
 ## Benchmarks
 
