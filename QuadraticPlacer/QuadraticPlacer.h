@@ -8,6 +8,7 @@ class QuadraticPlacer {
     struct Parameters {
         int begin{}, end;
         std::pair<double, double> low, high{100, 100};
+        bool vertical{};
 
         Parameters( const int size ) : end( size ) {}
 
@@ -16,7 +17,7 @@ class QuadraticPlacer {
         ) const;
 
         std::pair<double, double> get_new_boundary(
-            const std::pair<double, double>& coord, const bool vertical
+            const std::pair<double, double>& coord
         ) const;
     };
 
@@ -24,11 +25,8 @@ class QuadraticPlacer {
     std::vector<std::vector<int>> Nets;
     std::vector<std::pair<int, int>> Pins;
 
-    void quadratic_placement(
-        const Parameters& params, const bool vertical, const bool lower = true
-    );
-
-    Parameters partition( Parameters& params, const bool vertical = false );
+    void quadratic_placement(const Parameters& params, const bool lower = true);
+    Parameters partition( Parameters& params );
     void recursiveQP( Parameters& params, int depth = 3 );
 public:
     QuadraticPlacer( std::ifstream file );
