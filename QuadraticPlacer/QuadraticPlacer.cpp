@@ -5,7 +5,7 @@
 #include "solver.h"
 
 pair<double, double> QuadraticPlacer::Parameters::get_new_boundary(
-    const pair<double, double>& coord, const bool vertical
+    const pair<double, double>& coord
 ) const {
     return vertical ? make_pair(midpoint(low.first, high.first), coord.second) :
                       make_pair(coord.first, midpoint(low.second, high.second));
@@ -19,7 +19,7 @@ pair<double, double> QuadraticPlacer::Parameters::push_to_boundary(
 }
 
 void QuadraticPlacer::quadratic_placement(
-    const Parameters& params, const bool vertical, const bool lower
+    const Parameters& params, const bool lower
 ) {
     vector<int> row, column;
     vector<double> data;
@@ -31,39 +31,35 @@ void QuadraticPlacer::quadratic_placement(
         const int index = i + params.begin;
         const vector<unsigned>& nets = Gates[index].Nets;
 
-        for ( const unsigned& Net : nets ) {
-            const vector<int>& net = Nets[Net];
+        for ( const unsigned& net_index : nets ) {
+            const vector<int>& net = Nets[net_index];
             const double weight = 1 / static_cast<double>( net.size() - 1 );
 
             for ( const int& gate : net ) {
-                if ( gate < 0 ) {
-                    const auto [xi, yi] = params.push_to_boundary(Pins[~gate]);
-                    bx[i] += weight * xi;
-                    by[i] += weight * yi;
-                } else {
-                    if ( gate == index ) continue;
+                double xi, yi;
 
-                    if ( gate >= params.begin and gate < params.end ) {
+                if (gate < 0) tie(xi,yi) = params.push_to_boundary(Pins[~gate]);
+                else if ( gate >= params.begin and gate < params.end ) {
+                    if ( gate != index ) {
                         row.push_back( i );
                         column.push_back( gate - params.begin );
                         data.push_back( -weight );
-                    } else {
-                        const auto& [xlo, ylo] = params.low;
-                        const auto& [xhi, yhi] = params.high;
+                    }
 
-                        auto [xi, yi] = params.push_to_boundary(
-                            Gates[gate].coordinates
-                        );
+                    continue;
+                } else {
+                    const auto& [xLow, yLow] = params.low;
+                    const auto& [xHigh, yHigh] = params.high;
+                    tie(xi,yi)=params.push_to_boundary(Gates[gate].coordinates);
 
-                        if ( xi > xlo and xi < xhi and yi > ylo and yi < yhi ) {
-                            if ( vertical ) xi = lower ? xhi : xlo;
-                            else yi = lower ? yhi : ylo;
-                        }
-
-                        bx[i] += weight * xi;
-                        by[i] += weight * yi;
+                    if (xi > xLow and xi < xHigh and yi > yLow and yi < yHigh) {
+                        if ( params.vertical ) xi = lower ? xHigh : xLow;
+                        else yi = lower ? yHigh : yLow;
                     }
                 }
+
+                bx[i] += weight * xi;
+                by[i] += weight * yi;
             }
         }
 
@@ -82,18 +78,19 @@ void QuadraticPlacer::quadratic_placement(
     for (int i = 0; i < A.n; ++i) Gates[i+params.begin].coordinates.second=x[i];
 }
 
-QuadraticPlacer::Parameters QuadraticPlacer::partition( Parameters& params,
-                                                        const bool vertical ) {
+QuadraticPlacer::Parameters QuadraticPlacer::partition( Parameters& params ) {
     const int middle = midpoint( params.begin, params.end );
     const vector<Gate>::iterator begin = Gates.begin();
+    params.vertical ^= true;
     Parameters params2( params );
 
     ranges::nth_element(
         begin + params.begin,
         begin + middle,
         begin + params.end,
-        [&vertical](const pair<double,double>& a,const pair<double,double>& b) {
-            return vertical ? a<b : tie(a.second,a.first)<tie(b.second,b.first);
+        [&params](const pair<double, double>& a,const pair<double, double>& b) {
+            return params.vertical ? a < b :
+                tie( a.second, a.first ) < tie( b.second, b.first );
         },
         &Gate::coordinates
     );
@@ -105,17 +102,17 @@ QuadraticPlacer::Parameters QuadraticPlacer::partition( Parameters& params,
     }
 
     params2.begin = middle;
-    params2.low = params.get_new_boundary( params.low, vertical );
-    params.high = params.get_new_boundary( params.high, vertical );
+    params2.low = params.get_new_boundary( params.low );
+    params.high = params.get_new_boundary( params.high );
     params.end = middle;
-    quadratic_placement( params, vertical );
-    quadratic_placement( params2, vertical, false );
+    quadratic_placement( params );
+    quadratic_placement( params2, false );
     return params2;
 }
 
 void QuadraticPlacer::recursiveQP( Parameters& params, int depth ) {
     if ( depth-- ) {
-        Parameters params2 = partition( params, true );
+        Parameters params2 = partition( params );
         Parameters params3 = partition( params );
         Parameters params4 = partition( params2 );
         recursiveQP( params, depth );
@@ -154,7 +151,7 @@ QuadraticPlacer::QuadraticPlacer( ifstream file ) {
         Nets[--NetNumberConnectedTo].push_back( -PinID );
     }
 
-    quadratic_placement( params, false );
+    quadratic_placement( params );
     recursiveQP( params );
     ranges::sort( Gates, {}, &Gate::GateID );
 
