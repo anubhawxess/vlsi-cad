@@ -9,14 +9,14 @@ All implementations are written in **C++23** and make use of the [Boost.DynamicB
 | # | Directory | Topic | Description |
 |---|-----------|-------|-------------|
 | 1 | [BooleanCalculatorEngine](BooleanCalculatorEngine/) | Boolean Logic | Unate Recursive Complement and a full Boolean Calculator Engine operating on Positional Cube Notation (PCN) |
-| 2 | [QuadraticPlacer](QuadraticPlacer/) | Placement | Analytical quadratic placer with recursive partitioning (3QP core and 8x8 deep placer) |
+| 2 | [QuadraticPlacer](QuadraticPlacer/) | Placement | Analytical quadratic placer with recursive partitioning (8x8 deep placer with 64 regions) |
 | 3 | [Router](Router/) | Routing | Two-layer maze router with non-unit cell costs, bend penalties, and via support |
 
 ## Prerequisites
 
 - A C++23-capable compiler (GCC 14+, Clang 18+, or MSVC 19.38+)
 - [Boost](https://www.boost.org/) headers (for `dynamic_bitset`)
-- Standard library support for `<print>`, `<generator>`, and `<ranges>`
+- Standard library support for `<print>`, `<generator>`, `<numeric>`, and `<ranges>`
 
 ## Building
 
@@ -30,6 +30,7 @@ g++ -std=c++23 -O2 -o bce booleanCalculatorEngine.cpp cubeList.cpp
 # Example for QuadraticPlacer (requires a Conjugate Gradient solver header)
 cd QuadraticPlacer
 g++ -std=c++23 -O2 -o placer QuadraticPlacer.cpp
+# Usage: ./placer input.txt
 
 # Example for Router
 cd Router
